@@ -138,7 +138,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
         dep
       in
 
-      let rec process (ctx : Context.t) graph (m : Module.t) =
+      let rec process (ctx : Context.t) (graph : DependencyGraph.t) (m : Module.t) =
 
         let ctx = { ctx with current_filename = m.filename } in
 
@@ -677,7 +677,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
           exports;
           es_module;
         } in
-        DependencyGraph.add_module graph m;
+        graph.add_module m;
 
         (* check all static dependecies *)
         let%lwt missing = Lwt_list.filter_map_s
@@ -694,7 +694,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
                end
                else begin
                  let%lwt dep_module =
-                   match DependencyGraph.lookup_module graph resolved with
+                   match graph.lookup_module resolved with
                    | None ->
                      let%lwt m = read_module ctx cache resolved in
                      let%lwt m =
@@ -709,7 +709,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
                      Lwt.return m
                  in
                  let () =
-                   DependencyGraph.add_dependency graph m (req, Some dep_module)
+                   graph.add_dependency m (req, Some dep_module)
                  in
                  Lwt.return_none
                end
@@ -722,7 +722,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
         | _ -> raise (PackError (ctx, CannotResolveModules missing))
       in
 
-      let emit graph entry =
+      let emit (graph : DependencyGraph.t) entry =
         let emit bytes = Lwt_io.write channel bytes in
         let emit_module dep_map m =
           debug (fun m_ -> m_ "Emitting: %s" m.Module.filename);
@@ -749,7 +749,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
         let%lwt modules =
           let sorted =
             try
-              DependencyGraph.sort graph entry
+              graph.sort entry
             with
             | DependencyGraph.Cycle filenames ->
               raise (PackError (ctx, DependencyCycle filenames))
@@ -771,7 +771,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
                   if has_module filename
                   then true
                   else
-                    match DependencyGraph.lookup_module graph filename with
+                    match graph.lookup_module filename with
                     | Some m -> m.es_module
                     | None -> false
                )
@@ -780,7 +780,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
                   match get_module filename with
                   | Some m -> MDM.add dep m modules
                   | None ->
-                    match DependencyGraph.lookup_module graph filename with
+                    match graph.lookup_module filename with
                     | Some m -> MDM.add dep m modules
                     | None ->
                       Error.ie ("Module should be found. See previous step: "
@@ -842,8 +842,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
             dynamic_deps
           in
           let new_modules =
-            graph
-            |> DependencyGraph.get_modules
+            graph.get_modules ()
             |> List.map (fun path ->
                 String.replace
                   ~sub:ctx.package_dir

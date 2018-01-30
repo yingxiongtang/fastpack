@@ -477,7 +477,7 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
   in
 
   (* Gather dependencies *)
-  let rec process (ctx : Context.t) graph (m : Module.t) =
+  let rec process (ctx : Context.t) (graph : DependencyGraph.t) (m : Module.t) =
     let ctx = { ctx with current_filename = m.filename } in
     let m, dependencies =
       if (not m.analyzed) then begin
@@ -533,19 +533,19 @@ let pack ?(cache=Cache.fake ()) (ctx : Context.t) channel =
       else
         Lwt.return m
     in
-    DependencyGraph.add_module graph m;
+    graph.add_module m;
 
     let%lwt () =
       Lwt_list.iter_s
         (fun (req, resolved) ->
-          let%lwt dep_module = match DependencyGraph.lookup_module graph resolved with
+          let%lwt dep_module = match graph.lookup_module resolved with
             | None ->
               let%lwt m = read_module ctx cache resolved in
               process { ctx with stack = req :: ctx.stack } graph m
             | Some m ->
               Lwt.return m
           in
-          DependencyGraph.add_dependency graph m (req, Some dep_module);
+          graph.add_dependency m (req, Some dep_module);
           Lwt.return_unit
         )
         m.resolved_dependencies
@@ -616,7 +616,7 @@ var __DEV__ = %s;
 " (if ctx.mode = Mode.Development then "true" else "false") prefix entry_id
   in
 
-  let emit graph entry =
+  let emit (graph : DependencyGraph.t) entry =
     let emit bytes = Lwt_io.write channel bytes in
     let rec emit_module ?(seen=StringSet.empty) m =
       if StringSet.mem m.Module.id seen
@@ -625,7 +625,7 @@ var __DEV__ = %s;
         let seen = StringSet.add m.Module.id seen in
         let workspace = m.Module.workspace in
         let dep_map = Module.DependencyMap.empty in
-        let dependencies = DependencyGraph.lookup_dependencies graph m in
+        let dependencies = graph.lookup_dependencies m in
         let%lwt (dep_map, seen) = Lwt_list.fold_left_s
             (fun (dep_map, seen) (dep, m) ->
                match m with
@@ -671,8 +671,7 @@ var __DEV__ = %s;
   let%lwt _ = emit graph entry in
   let%lwt () = cache.dump () in
   let modules =
-    graph
-    |> DependencyGraph.get_modules
+    graph.get_modules ()
     |> List.map (fun path -> String.replace ~sub:ctx.package_dir ~by:"." path)
   in
 

@@ -1,75 +1,92 @@
 module StringSet = Set.Make(String)
+module M = Map.Make(String)
 
 type t = {
-  modules : (string, Module.t) Hashtbl.t;
-  dependencies : (string, (Dependency.t * Module.t option)) Hashtbl.t;
+  get_modules : unit -> string list;
+  lookup_module : string -> Module.t option;
+  lookup_dependencies : Module.t -> (Dependency.t * Module.t option) list;
+  add_module : Module.t -> unit;
+  add_dependency : Module.t -> Dependency.t * Module.t option -> unit;
+  sort : Module.t -> Module.t list;
 }
-
-let iter_modules iter graph =
-  Hashtbl.iter iter graph.modules
-
-let get_modules graph =
-  Hashtbl.keys_list graph.modules
-
-let empty ?(size=2000) () = {
-  modules = Hashtbl.create size;
-  dependencies = Hashtbl.create (size * 20);
-}
-
-let lookup table key =
-  try Some (Hashtbl.find table key) with Not_found -> None
-
-let lookup_module graph filename =
-  lookup graph.modules filename
-
-let lookup_dependencies graph (m : Module.t) =
-  Hashtbl.find_all graph.dependencies m.filename
-
-let add_module graph (m : Module.t) =
-  Hashtbl.add graph.modules m.filename m
-
-let add_dependency graph (m : Module.t) (dep : (Dependency.t * Module.t option)) =
-  Hashtbl.add graph.dependencies m.filename dep;
-
 
 exception Cycle of string list
 
-let sort graph entry =
-  let modules = ref [] in
-  let seen_globally = ref (StringSet.empty) in
-  let add_module m =
-    modules := m :: !modules;
-    seen_globally := StringSet.add m.Module.filename !seen_globally
+let empty () =
+  let modules = ref M.empty in
+  let dependencies = ref M.empty in
+
+  let get_modules () =
+    !modules |> M.bindings |> List.map fst
   in
-  let check_module m =
-    StringSet.mem m.Module.filename !seen_globally
+
+  let lookup_module filename =
+    M.get filename !modules
   in
-  let rec sort seen m =
-    match List.mem m.Module.filename seen with
-    | true ->
-      let prev_m =
-        match lookup_module graph (List.hd seen) with
-        | Some prev_m -> prev_m
-        | None -> Error.ie "DependencyGraph.sort - imporssible state"
-      in
-      if m.Module.es_module && prev_m.Module.es_module
-      then ()
-      else
-        let filenames = m.Module.filename :: seen in
-        raise (Cycle filenames)
-    | false ->
-      match check_module m with
-      | true -> ()
-      | false ->
-        let sort' = sort (m.Module.filename :: seen) in
-        let () =
-          List.iter
-            sort'
-            (List.filter_map (fun (_, m) -> m) (lookup_dependencies graph m))
+
+  let lookup_dependencies (m : Module.t) =
+    match M.get m.filename !dependencies with
+    | None -> []
+    | Some deps -> deps
+  in
+
+  let add_module (m : Module.t) =
+    modules := M.add m.filename m !modules
+  in
+
+  let add_dependency (m : Module.t) (dep : (Dependency.t * Module.t option)) =
+    dependencies :=
+      M.update
+        m.filename
+        (function | None -> Some [dep] | Some deps -> Some (dep::deps))
+        !dependencies
+  in
+
+  let sort entry =
+    let sorted = ref [] in
+    let seen_globally = ref (StringSet.empty) in
+    let add_module m =
+      sorted := m :: !sorted;
+      seen_globally := StringSet.add m.Module.filename !seen_globally
+    in
+    let check_module m =
+      StringSet.mem m.Module.filename !seen_globally
+    in
+    let rec sort seen m =
+      match List.mem m.Module.filename seen with
+      | true ->
+        let prev_m =
+          match lookup_module (List.hd seen) with
+          | Some prev_m -> prev_m
+          | None -> Error.ie "DependencyGraph.sort - imporssible state"
         in
-          add_module m;
+        if m.Module.es_module && prev_m.Module.es_module
+        then ()
+        else
+          let filenames = m.Module.filename :: seen in
+          raise (Cycle filenames)
+      | false ->
+        match check_module m with
+        | true -> ()
+        | false ->
+          let sort' = sort (m.Module.filename :: seen) in
+          let () =
+            List.iter
+              sort'
+              (List.filter_map (fun (_, m) -> m) (lookup_dependencies m))
+          in
+            add_module m;
+    in
+    begin
+      sort [] entry;
+      List.rev !sorted
+    end
   in
-  begin
-    sort [] entry;
-    List.rev !modules
-  end
+  {
+    get_modules;
+    lookup_module;
+    lookup_dependencies;
+    add_module;
+    add_dependency;
+    sort;
+  }

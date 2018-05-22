@@ -27,6 +27,7 @@ type options = {
   mode : Mode.t;
   mock : (string * Resolver.Mock.t) list;
   node_modules_paths : string list;
+  project_root_path : string;
   resolve_extension : string list;
   target : Target.t;
   cache : Cache.strategy;
@@ -107,8 +108,13 @@ let prepare_and_pack options start_time =
     |> List.map (fun ext -> match String.get ext 0 with | '.' -> ext | _ -> "." ^ ext)
   in
   let get_context current_location =
+    let project_root = FastpackUtil.FS.abs_path
+      current_dir
+      options.project_root_path
+    in
     let resolver =
       Resolver.make
+        ~project_root
         ~current_dir
         ~mock:(options.mock)
         ~node_modules_paths:(options.node_modules_paths)
@@ -126,6 +132,7 @@ let prepare_and_pack options start_time =
       entry_location;
       current_location;
       current_dir;
+      project_root;
       project_package;
       output_dir;
       stack = [];

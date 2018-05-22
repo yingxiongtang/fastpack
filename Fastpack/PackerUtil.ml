@@ -194,6 +194,7 @@ end
 
 module Context = struct
   type t = {
+    project_root : string;
     current_dir : string;
     project_package : Package.t;
     output_dir : string;
@@ -341,7 +342,7 @@ let read_module
         match filename with
         | Some filename ->
           let%lwt _ =
-            if not (FilePath.is_subdir filename ctx.current_dir)
+            if not (FilePath.is_subdir filename ctx.project_root)
             then Lwt.fail (PackError (ctx, CannotLeavePackageDir filename))
             else Lwt.return_unit
           in
